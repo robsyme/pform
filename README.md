@@ -109,6 +109,27 @@ pform compute-env get --workspace-id 123 <compute-env-id>
 pform compute-env validate-name --workspace-id 123 <name>
 ```
 
+#### Shell Completion
+
+Generate shell completions for your preferred shell:
+
+```bash
+# Generate bash completions
+pform generate-completions bash > ~/.local/share/bash-completion/completions/pform
+
+# Generate zsh completions
+pform generate-completions zsh > ~/.zfunc/_pform
+
+# Generate fish completions
+pform generate-completions fish > ~/.config/fish/completions/pform.fish
+```
+
+For zsh, make sure `~/.zfunc` is in your `fpath` by adding this to your `.zshrc`:
+```zsh
+fpath=(~/.zfunc $fpath)
+autoload -U compinit; compinit
+```
+
 ### Verbose Mode
 
 Add the `--verbose` flag to any command to see detailed HTTP request/response information:

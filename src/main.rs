@@ -1,9 +1,10 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, CommandFactory};
 use env_logger;
 use log::error;
 use std::env;
 use std::process;
 use pform::SeqeraClient;
+use clap_complete;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -27,6 +28,12 @@ enum Commands {
     /// Compute environment commands
     #[command(subcommand)]
     ComputeEnv(ComputeEnvCommands),
+    /// Generate shell completions
+    GenerateCompletions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -107,6 +114,16 @@ async fn main() {
     env_logger::init();
 
     let cli = Cli::parse();
+
+    if let Commands::GenerateCompletions { shell } = cli.command {
+        clap_complete::generate(
+            shell,
+            &mut Cli::command(),
+            "pform",
+            &mut std::io::stdout()
+        );
+        return;
+    }
 
     let token = match env::var("TOWER_ACCESS_TOKEN") {
         Ok(token) => token,
@@ -295,7 +312,8 @@ async fn main() {
                     }
                 }
             },
-        }
+        },
+        Commands::GenerateCompletions { .. } => (),
     }
 }
 
