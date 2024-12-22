@@ -1,0 +1,31 @@
+[package]
+name = "pform"
+version = "0.1.0"
+edition = "2021"
+description = "Rust client for the Seqera Platform API"
+authors = ["Rob Syme"]
+license = "MIT"
+
+[dependencies]
+chrono = { version = "0.4.39", features = ["serde"] }
+clap = { version = "4.4", features = ["derive"] }
+env_logger = "0.10"
+lazy_static = "1.4"
+log = "0.4"
+regex = "1.10"
+reqwest = { version = "0.11", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+url = "2.5"
+
+[dev-dependencies]
+mockito = "1.2"
+tokio-test = "0.4"
+wiremock = "0.5"
+pretty_assertions = "1.4"
+
+[[bin]]
+name = "pform"
+path = "src/main.rs"
