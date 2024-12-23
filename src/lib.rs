@@ -2,9 +2,11 @@ pub mod client;
 pub mod models;
 pub mod errors;
 pub mod utils;
+pub mod tui;
 
 pub use client::SeqeraClient;
 pub use models::*;
+pub use errors::SeqeraError;
 
 #[cfg(test)]
 mod tests {

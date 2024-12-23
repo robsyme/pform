@@ -4,6 +4,7 @@ use log::error;
 use std::env;
 use std::process;
 use pform::SeqeraClient;
+use pform::models::compute_env::ComputeEnvStatus;
 use clap_complete;
 
 #[derive(Parser)]
@@ -34,6 +35,8 @@ enum Commands {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+    /// Launch interactive console
+    Console,
 }
 
 #[derive(Debug, Subcommand)]
@@ -110,211 +113,96 @@ pub enum ComputeEnvCommands {
 }
 
 #[tokio::main]
-async fn main() {
-    env_logger::init();
-
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    if let Commands::GenerateCompletions { shell } = cli.command {
-        clap_complete::generate(
-            shell,
-            &mut Cli::command(),
-            "pform",
-            &mut std::io::stdout()
-        );
-        return;
+    if cli.verbose {
+        env::set_var("RUST_LOG", "debug");
     }
-
-    let token = match env::var("TOWER_ACCESS_TOKEN") {
-        Ok(token) => token,
-        Err(_) => {
-            error!("TOWER_ACCESS_TOKEN environment variable not set");
-            process::exit(1);
-        }
-    };
-
-    let mut client = match SeqeraClient::new(token) {
-        Ok(client) => client,
-        Err(e) => {
-            error!("Failed to create client: {}", e);
-            process::exit(1);
-        }
-    };
-
-    client.set_verbose(cli.verbose);
+    env_logger::init();
 
     match cli.command {
-        Commands::Orgs(cmd) => match cmd {
-            OrgCommands::List => match client.list_organizations().await {
-                Ok(response) => {
-                    println!("Found {} organizations:", response.organizations.len());
-                    for org in response.organizations {
-                        println!("{:<8} {}", org.id.0, org.name);
-                        if let Some(desc) = org.description {
-                            println!("  {}", desc);
-                        }
-                        println!();
-                    }
+        Commands::Console => {
+            pform::tui::run().await?;
+        }
+        Commands::GenerateCompletions { shell } => {
+            clap_complete::generate(shell, &mut Cli::command(), "pform", &mut std::io::stdout());
+        }
+        Commands::Orgs(cmd) => {
+            let token = env::var("TOWER_ACCESS_TOKEN")
+                .map_err(|_| "TOWER_ACCESS_TOKEN environment variable not set")?;
+            let client = SeqeraClient::new(token)?;
+            match cmd {
+                OrgCommands::List => {
+                    let orgs = client.list_organizations().await?;
+                    println!("{:#?}", orgs);
                 }
-                Err(e) => {
-                    error!("Failed to list organizations: {}", e);
-                    process::exit(1);
+                OrgCommands::Get { id } => {
+                    let org = client.get_organization(id).await?;
+                    println!("{:#?}", org);
                 }
-            },
-            OrgCommands::Get { id } => match client.get_organization(id).await {
-                Ok(org) => {
-                    println!("ID:          {}", org.id.0);
-                    println!("Name:        {}", org.name);
-                    if let Some(desc) = org.description {
-                        println!("Description: {}", desc);
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to get organization: {}", e);
-                    process::exit(1);
-                }
-            },
-            OrgCommands::ValidateName { name } => match client.validate_organization_name(&name).await {
-                Ok(_) => println!("Organization name '{}' is valid", name),
-                Err(e) => {
-                    error!("Organization name validation failed: {}", e);
-                    process::exit(1);
-                }
-            },
-        },
-        Commands::Workspaces(cmd) => match cmd {
-            WorkspaceCommands::List { org_id, org_name } => {
-                let org_id = match (org_id, org_name) {
-                    (Some(id), _) => id,
-                    (None, Some(name)) => {
-                        match client.find_organization_by_name(&name).await {
-                            Ok(Some(org)) => org.id.0,
-                            Ok(None) => {
-                                error!("Organization '{}' not found", name);
-                                process::exit(1);
-                            }
-                            Err(e) => {
-                                error!("Failed to find organization: {}", e);
-                                process::exit(1);
-                            }
-                        }
-                    }
-                    (None, None) => {
-                        error!("Either --org-id or --org-name must be specified");
-                        process::exit(1);
-                    }
-                };
-
-                match client.list_workspaces(org_id).await {
-                    Ok(workspaces) => {
-                        println!("Found {} workspaces:", workspaces.workspaces.len());
-                        for workspace in workspaces.workspaces {
-                            println!("{} ({})", workspace.name, workspace.id);
-                            if let Some(desc) = workspace.description {
-                                println!("  {}", desc);
-                            }
-                            println!("  Visibility: {}", workspace.visibility);
-                            println!();
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to list workspaces: {}", e);
-                        process::exit(1);
-                    }
-                }
-            },
-            WorkspaceCommands::View { org_id, id } => {
-                match client.get_workspace(org_id, id).await {
-                    Ok(workspace) => {
-                        println!("ID:          {}", workspace.id);
-                        println!("Name:        {}", workspace.name);
-                        println!("Full Name:   {}", workspace.full_name);
-                        if let Some(desc) = workspace.description {
-                            println!("Description: {}", desc);
-                        }
-                        println!("Visibility:  {}", workspace.visibility);
-                    }
-                    Err(e) => {
-                        error!("Failed to get workspace: {}", e);
-                        process::exit(1);
-                    }
+                OrgCommands::ValidateName { name } => {
+                    let result = client.validate_organization_name(&name).await?;
+                    println!("{:#?}", result);
                 }
             }
-        },
-        Commands::ComputeEnv(cmd) => match cmd {
-            ComputeEnvCommands::List { workspace_id, status: _ } => {
-                match client.list_compute_envs(workspace_id, None).await {
-                    Ok(response) => {
-                        println!("Found {} compute environments:", response.compute_envs.len());
-                        for ce in response.compute_envs {
-                            println!("\nID:          {}", ce.id);
-                            println!("Name:        {}", ce.name);
-                            println!("Platform:    {}", ce.platform);
-                            println!("Status:      {}", ce.status);
-                            if let Some(message) = &ce.message {
-                                println!("Message:     {}", message);   
-                            }
-                            if let Some(last_used) = &ce.last_used {
-                                println!("Last Used:   {}", last_used);
-                            }
-                            if let Some(primary) = ce.primary {
-                                println!("Primary:     {}", primary);
-                            }
-                            println!("Workspace:   {}", ce.workspace_name);
-                            println!("Visibility:  {}", ce.visibility);
-                            println!("Work Dir:    {}", ce.work_dir);
-                            if let Some(region) = &ce.region {
-                                println!("Region:      {}", region);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to list compute environments: {}", e);
+        }
+        Commands::Workspaces(cmd) => {
+            let token = env::var("TOWER_ACCESS_TOKEN")
+                .map_err(|_| "TOWER_ACCESS_TOKEN environment variable not set")?;
+            let client = SeqeraClient::new(token)?;
+            match cmd {
+                WorkspaceCommands::List { org_id, org_name } => {
+                    let workspaces = if let Some(id) = org_id {
+                        client.list_workspaces(id).await?
+                    } else if let Some(name) = org_name {
+                        // First find the organization ID
+                        let orgs = client.list_organizations().await?;
+                        let org = orgs.organizations.into_iter()
+                            .find(|o| o.name == name)
+                            .ok_or_else(|| format!("Organization '{}' not found", name))?;
+                        client.list_workspaces(org.id).await?
+                    } else {
+                        error!("Either org_id or org_name must be provided");
                         process::exit(1);
-                    }
+                    };
+                    println!("{:#?}", workspaces);
                 }
-            },
-            ComputeEnvCommands::Get { compute_env_id, workspace_id } => {
-                match client.get_compute_env(&compute_env_id, workspace_id).await {
-                    Ok(ce) => {
-                        println!("ID:            {}", ce.id);
-                        println!("Name:          {}", ce.name);
-                        if let Some(desc) = &ce.description {
-                            println!("Description:   {}", desc);
-                        }
-                        println!("Platform:      {:?}", ce.platform);
-                        println!("Status:        {}", ce.status);
-                        if let Some(message) = ce.message {
-                            println!("Message:       {}", message);
-                        }
-                        println!("Date Created:  {}", ce.date_created);
-                        println!("Last Updated:  {}", ce.last_updated);
-                        println!("Last Used:     {}", ce.last_used);
-                        if let Some(primary) = ce.primary {
-                            println!("Primary:       {}", primary);
-                        }
-                        println!("Org ID:        {}", ce.org_id);
-                        println!("Workspace ID:  {}", ce.workspace_id);
-                        
-                    }
-                    Err(e) => {
-                        error!("Failed to get compute environment: {}", e);
-                        process::exit(1);
-                    }
+                WorkspaceCommands::View { org_id, id } => {
+                    let workspace = client.get_workspace(org_id, id).await?;
+                    println!("{:#?}", workspace);
                 }
-            },
-            ComputeEnvCommands::ValidateName { workspace_id, name } => {
-                match client.validate_compute_env_name(workspace_id, &name).await {
-                    Ok(_) => println!("Compute environment name '{}' is valid", name),
-                    Err(e) => {
-                        error!("Name validation failed: {}", e);
-                        process::exit(1);
-                    }
+            }
+        }
+        Commands::ComputeEnv(cmd) => {
+            let token = env::var("TOWER_ACCESS_TOKEN")
+                .map_err(|_| "TOWER_ACCESS_TOKEN environment variable not set")?;
+            let client = SeqeraClient::new(token)?;
+            match cmd {
+                ComputeEnvCommands::List { workspace_id, status } => {
+                    let status = status.map(|s| match s.to_uppercase().as_str() {
+                        "CREATING" => ComputeEnvStatus::Creating,
+                        "AVAILABLE" => ComputeEnvStatus::Available,
+                        "ERRORED" => ComputeEnvStatus::Errored,
+                        "INVALID" => ComputeEnvStatus::Invalid,
+                        _ => ComputeEnvStatus::Available,
+                    });
+                    let envs = client.list_compute_envs(workspace_id, status).await?;
+                    println!("{:#?}", envs);
                 }
-            },
-        },
-        Commands::GenerateCompletions { .. } => (),
+                ComputeEnvCommands::Get { compute_env_id, workspace_id } => {
+                    let env = client.get_compute_env(&compute_env_id, workspace_id).await?;
+                    println!("{:#?}", env);
+                }
+                ComputeEnvCommands::ValidateName { workspace_id, name } => {
+                    let result = client.validate_compute_env_name(workspace_id, &name).await?;
+                    println!("{:#?}", result);
+                }
+            }
+        }
     }
+
+    Ok(())
 }
 
 
